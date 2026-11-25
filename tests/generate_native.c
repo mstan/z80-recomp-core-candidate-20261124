@@ -8,5 +8,10 @@ int main(int argc,char **argv){
  for(unsigned i=0;i<8;++i){Z80Insn in;if(z80_decode(ops[i],len[i],0x100,&in)!=len[i])return 2;
   fprintf(f,"void native_%u(Z80State *s){\n",i);
   if(z80_emit_step_body(f,&in,0x100)!=Z80_EMIT_OK)return 3;fputs("}\n",f);}
+ const unsigned char jump[]={0xc3,0xb2,0};Z80Insn in;
+ if(z80_decode(jump,3,0x100,&in)!=3)return 4;
+ fputs("void native_live_jump(Z80State *s){\n",f);
+ if(z80_emit_live_operand_case(f,&in,0x100)!=Z80_EMIT_OK)return 5;
+ fputs("}\n",f);
  return fclose(f)!=0;
 }
