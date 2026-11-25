@@ -10,6 +10,10 @@ void sms_io_out(uint8_t p,uint8_t v){(void)p;(void)v;}
 void native_0(Z80State*);void native_1(Z80State*);void native_2(Z80State*);void native_3(Z80State*);
 void native_4(Z80State*);void native_5(Z80State*);void native_6(Z80State*);void native_7(Z80State*);
 void native_live_jump(Z80State*);
+void native_live_cc_0(Z80State*);void native_live_cc_1(Z80State*);
+void native_live_cc_2(Z80State*);void native_live_cc_3(Z80State*);
+void native_live_cc_4(Z80State*);void native_live_cc_5(Z80State*);
+void native_live_cc_6(Z80State*);void native_live_cc_7(Z80State*);
 int main(void){Z80State a={0},b={0};native_0(&a);CHECK(a.a==0x7f && a.pc==0x102 && a.cyc==7);
  native_1(&a);CHECK(a.a==0x80 && (a.f&Z80_FLAG_P));CHECK(b.a==0 && b.cyc==0);
  native_2(&a);CHECK(a.ix==0x1000);native_3(&a);CHECK(memory[0xfff]==0x42);
@@ -23,4 +27,13 @@ int main(void){Z80State a={0},b={0};native_0(&a);CHECK(a.a==0x7f && a.pc==0x102 
  memory[0x100]=0xc3;memory[0x101]=0x56;memory[0x102]=0x34;
  native_live_jump(&a);CHECK(a.pc==0x3456 && a.r==0x80 && a.cyc==27 && a.f==0xa5 && a.sp==0xfe00);
  b=a;memory[0x100]=0;native_live_jump(&a);CHECK(!memcmp(&a,&b,sizeof a));
+ void (*jumps[8])(Z80State*)={native_live_cc_0,native_live_cc_1,native_live_cc_2,native_live_cc_3,
+  native_live_cc_4,native_live_cc_5,native_live_cc_6,native_live_cc_7};
+ const unsigned flags[4]={Z80_FLAG_Z,Z80_FLAG_C,Z80_FLAG_P,Z80_FLAG_S};
+ for(unsigned cc=0;cc<8;++cc)for(unsigned set=0;set<2;++set){
+  memset(&a,0,sizeof a);a.pc=0x100;a.r=0x7f;a.f=set?0xff:0;a.cyc=7;a.sp=0xfe00;
+  memory[0x100]=0xc2|(cc<<3);memory[0x101]=0x56;memory[0x102]=0x34;
+  const int taken=((a.f&flags[cc>>1])!=0)==(int)(cc&1);
+  jumps[cc](&a);CHECK(a.pc==(taken?0x3456:0x103) && a.r==0 && a.cyc==17 && a.f==(set?0xff:0) && a.sp==0xfe00);
+  b=a;memory[0x100]=0;jumps[cc](&a);CHECK(!memcmp(&a,&b,sizeof a));}
  return 0;}

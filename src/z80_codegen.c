@@ -545,6 +545,17 @@ static void emit_flat_body(FILE *o, const Z80Insn *in, uint16_t addr)
 
 static bool emit_flat_live_operands(FILE *o, const Z80Insn *in, uint16_t addr)
 {
+    if (in->prefix == Z80_PFX_NONE && in->length == 3 &&
+        (in->opcode & 0xC7) == 0xC2) {
+        fprintf(o, "        if (sms_read8(0x%04X) == 0x%02X) {\n", addr, in->opcode);
+        fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 1) & 0x7f));\n");
+        fprintf(o, "        s->pc = 0x%04X;\n", (uint16_t)(addr + 3));
+        fprintf(o, "        s->cyc += %d;\n", cyc_base(in));
+        fprintf(o, "        uint16_t target = sms_read16(0x%04X);\n", (uint16_t)(addr + 1));
+        fprintf(o, "        if (%s) s->pc = target;\n", cond((in->opcode >> 3) & 7));
+        fprintf(o, "            return;\n        }\n");
+        return true;
+    }
     if (in->prefix == Z80_PFX_NONE && in->length == 3 && in->opcode == 0xC3) {
         fprintf(o, "        if (sms_read8(0x%04X) == 0xC3) {\n", addr);
         fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 1) & 0x7f));\n");
