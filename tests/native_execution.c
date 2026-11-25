@@ -14,6 +14,8 @@ void native_live_cc_0(Z80State*);void native_live_cc_1(Z80State*);
 void native_live_cc_2(Z80State*);void native_live_cc_3(Z80State*);
 void native_live_cc_4(Z80State*);void native_live_cc_5(Z80State*);
 void native_live_cc_6(Z80State*);void native_live_cc_7(Z80State*);
+#define ALU_DECL(n) void native_live_alu_##n(Z80State*);void native_const_alu_##n(Z80State*);
+ALU_DECL(0) ALU_DECL(1) ALU_DECL(2) ALU_DECL(3) ALU_DECL(4) ALU_DECL(5) ALU_DECL(6) ALU_DECL(7)
 int main(void){Z80State a={0},b={0};native_0(&a);CHECK(a.a==0x7f && a.pc==0x102 && a.cyc==7);
  native_1(&a);CHECK(a.a==0x80 && (a.f&Z80_FLAG_P));CHECK(b.a==0 && b.cyc==0);
  native_2(&a);CHECK(a.ix==0x1000);native_3(&a);CHECK(memory[0xfff]==0x42);
@@ -36,4 +38,13 @@ int main(void){Z80State a={0},b={0};native_0(&a);CHECK(a.a==0x7f && a.pc==0x102 
   const int taken=((a.f&flags[cc>>1])!=0)==(int)(cc&1);
   jumps[cc](&a);CHECK(a.pc==(taken?0x3456:0x103) && a.r==0 && a.cyc==17 && a.f==(set?0xff:0) && a.sp==0xfe00);
   b=a;memory[0x100]=0;jumps[cc](&a);CHECK(!memcmp(&a,&b,sizeof a));}
+ void (*live_alu[8])(Z80State*)={native_live_alu_0,native_live_alu_1,native_live_alu_2,native_live_alu_3,
+  native_live_alu_4,native_live_alu_5,native_live_alu_6,native_live_alu_7};
+ void (*const_alu[8])(Z80State*)={native_const_alu_0,native_const_alu_1,native_const_alu_2,native_const_alu_3,
+  native_const_alu_4,native_const_alu_5,native_const_alu_6,native_const_alu_7};
+ for(unsigned alu=0;alu<8;++alu)for(unsigned carry=0;carry<2;++carry)for(unsigned v=0;v<3;++v){
+  memset(&a,0,sizeof a);a.pc=0x100;a.r=0xff;a.f=carry?0xff:0;a.a=v==0?0:v==1?0x7f:0xff;a.cyc=17;
+  b=a;memory[0x100]=0xc6|(alu<<3);memory[0x101]=0x2c;
+  live_alu[alu](&a);const_alu[alu](&b);CHECK(!memcmp(&a,&b,sizeof a));
+  b=a;memory[0x100]=0;live_alu[alu](&a);CHECK(!memcmp(&a,&b,sizeof a));}
  return 0;}

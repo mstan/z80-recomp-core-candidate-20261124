@@ -18,5 +18,14 @@ int main(int argc,char **argv){
   fprintf(f,"void native_live_cc_%u(Z80State *s){\n",cc);
   if(z80_emit_live_operand_case(f,&in,0x100)!=Z80_EMIT_OK)return 7;
   fputs("}\n",f);}
+ for(unsigned alu=0;alu<8;++alu){unsigned char code[]={0xc6|(alu<<3),0xff};
+  if(z80_decode(code,2,0x100,&in)!=2)return 8;
+  fprintf(f,"void native_live_alu_%u(Z80State *s){\n",alu);
+  if(z80_emit_live_operand_case(f,&in,0x100)!=Z80_EMIT_OK)return 9;
+  fputs("}\n",f);code[1]=0x2c;
+  if(z80_decode(code,2,0x100,&in)!=2)return 10;
+  fprintf(f,"void native_const_alu_%u(Z80State *s){\n",alu);
+  if(z80_emit_step_body(f,&in,0x100)!=Z80_EMIT_OK)return 11;
+  fputs("}\n",f);}
  return fclose(f)!=0;
 }

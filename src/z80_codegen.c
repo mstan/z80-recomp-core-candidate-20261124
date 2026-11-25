@@ -584,6 +584,19 @@ static bool emit_flat_live_operands(FILE *o, const Z80Insn *in, uint16_t addr)
         return true;
     }
 
+    if (in->prefix == Z80_PFX_NONE && in->length == 2 &&
+        (in->opcode & 0xC7) == 0xC6) {
+        char value[40];
+        snprintf(value, sizeof value, "sms_read8(0x%04X)", (uint16_t)(addr + 1));
+        fprintf(o, "        if (sms_read8(0x%04X) == 0x%02X) {\n", addr, in->opcode);
+        fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 1) & 0x7f));\n");
+        fprintf(o, "        s->pc = 0x%04X;\n", (uint16_t)(addr + 2));
+        fprintf(o, "        s->cyc += %d;\n", cyc_base(in));
+        emit_alu(o, (in->opcode >> 3) & 7, value);
+        fprintf(o, "            return;\n        }\n");
+        return true;
+    }
+
     if (in->prefix == Z80_PFX_NONE && (in->opcode & 0xC7) == 0x06 &&
         in->length == 2) {
         int y = (in->opcode >> 3) & 7;
