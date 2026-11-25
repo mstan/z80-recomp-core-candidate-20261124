@@ -61,7 +61,9 @@ uint8_t  sms_io_in (uint8_t port);
 void     sms_io_out(uint8_t port, uint8_t val);
 
 static inline uint16_t sms_read16(uint16_t a){
-    return (uint16_t)(sms_read8(a) | (sms_read8((uint16_t)(a+1))<<8));
+    uint8_t lo = sms_read8(a);
+    uint8_t hi = sms_read8((uint16_t)(a + 1u));
+    return (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
 }
 static inline void sms_write16(uint16_t a, uint16_t v){
     sms_write8(a,(uint8_t)v); sms_write8((uint16_t)(a+1),(uint8_t)(v>>8));
