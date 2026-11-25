@@ -10,6 +10,15 @@ typedef enum {Z80_EMIT_OK,Z80_EMIT_INVALID,Z80_EMIT_UNSUPPORTED,Z80_EMIT_IO} Z80
 extern "C" {
 #endif
 Z80EmitResult z80_emit_step_body(FILE *,const Z80Insn *,uint16_t address);
+/* Reuse one caller-owned seekable update stream for a complete image. Scratch
+ * differs from output; neither is closed. Old scratch tail bytes are excluded.
+ * This avoids exhausting host temporary-name pools for large generations. */
+Z80EmitResult z80_emit_step_body_with_scratch(FILE *output,FILE *scratch,const Z80Insn *,uint16_t address);
+/* Emit a guarded native case for supported mutable operand templates.
+ * Opcode shape stays statically decoded; only operands are read live.
+ * Unsupported shapes leave output untouched and use the ordinary guarded case. */
+Z80EmitResult z80_emit_live_operand_case(FILE *,const Z80Insn *,uint16_t address);
+Z80EmitResult z80_emit_live_operand_case_with_scratch(FILE *output,FILE *scratch,const Z80Insn *,uint16_t address);
 #ifdef __cplusplus
 }
 #endif

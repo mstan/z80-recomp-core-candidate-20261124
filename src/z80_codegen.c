@@ -543,16 +543,102 @@ static void emit_flat_body(FILE *o, const Z80Insn *in, uint16_t addr)
 }
 
 
-Z80EmitResult z80_emit_step_body(FILE *output, const Z80Insn *in, uint16_t address) {
- if(!output || !in || in->length<1 || in->length>4 || in->prefix>Z80_PFX_FDCB) return Z80_EMIT_INVALID;
- if(in->illegal) return Z80_EMIT_UNSUPPORTED;
- FILE *temporary=tmpfile(); if(!temporary)return Z80_EMIT_IO;
- if(setjmp(emitter_escape)){fclose(temporary);return Z80_EMIT_UNSUPPORTED;}
- emit_flat_body(temporary,in,address);
- if(ferror(temporary) || fflush(temporary)!=0 || fseek(temporary,0,SEEK_SET)!=0){fclose(temporary);return Z80_EMIT_IO;}
- char block[4096];size_t count;
- while((count=fread(block,1,sizeof block,temporary))!=0)
-  if(fwrite(block,1,count,output)!=count){fclose(temporary);return Z80_EMIT_IO;}
- int failed=ferror(temporary);fclose(temporary);
- return failed?Z80_EMIT_IO:Z80_EMIT_OK;
+static bool emit_flat_live_operands(FILE *o, const Z80Insn *in, uint16_t addr)
+{
+    if (in->prefix == Z80_PFX_NONE && in->length == 3 &&
+        (in->opcode == 0x22 || in->opcode == 0x2A ||
+         in->opcode == 0x32 || in->opcode == 0x3A)) {
+        fprintf(o, "        if (sms_read8(0x%04X) == 0x%02X) {\n", addr,
+                in->opcode);
+        fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 1) & 0x7f));\n");
+        fprintf(o, "        s->pc = 0x%04X;\n", (uint16_t)(addr + 3));
+        fprintf(o, "        s->cyc += %d;\n", cyc_base(in));
+        fprintf(o, "        uint16_t nn = sms_read16(0x%04X);\n",
+                (uint16_t)(addr + 1));
+        switch (in->opcode) {
+        case 0x22: fprintf(o, "        sms_write16(nn, z80_hl(s));\n"); break;
+        case 0x2A: fprintf(o, "        z80_set_hl(s, sms_read16(nn));\n"); break;
+        case 0x32: fprintf(o, "        sms_write8(nn, s->a);\n"); break;
+        case 0x3A: fprintf(o, "        s->a = sms_read8(nn);\n"); break;
+        }
+        fprintf(o, "            return;\n        }\n");
+        return true;
+    }
+
+    if (in->prefix == Z80_PFX_NONE && (in->opcode & 0xC7) == 0x06 &&
+        in->length == 2) {
+        int y = (in->opcode >> 3) & 7;
+        OpCtx c = {NULL, false, 0};
+        char value[40];
+        snprintf(value, sizeof value, "sms_read8(0x%04X)", (uint16_t)(addr + 1));
+        fprintf(o, "        if (sms_read8(0x%04X) == 0x%02X) {\n", addr,
+                in->opcode);
+        fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 1) & 0x7f));\n");
+        fprintf(o, "        s->pc = 0x%04X;\n", (uint16_t)(addr + 2));
+        fprintf(o, "        s->cyc += %d;\n", cyc_base(in));
+        if (y == 6) fprintf(o, "        uint16_t ea = z80_hl(s);\n");
+        fprintf(o, "        %s\n", r8w(&c, y, value));
+        fprintf(o, "            return;\n        }\n");
+        return true;
+    }
+
+    if ((in->prefix == Z80_PFX_DD || in->prefix == Z80_PFX_FD) &&
+        in->uses_disp && in->length == 3 &&
+        (in->opcode >> 6) == 2 && (in->opcode & 7) == 6) {
+        const char *idx = in->prefix == Z80_PFX_DD ? "s->ix" : "s->iy";
+        int alu = (in->opcode >> 3) & 7;
+        fprintf(o, "        if (sms_read8(0x%04X) == 0x%02X && sms_read8(0x%04X) == 0x%02X) {\n",
+                addr, in->raw[0], (uint16_t)(addr + 1), in->opcode);
+        fprintf(o, "        s->r = (uint8_t)((s->r & 0x80) | ((s->r + 2) & 0x7f));\n");
+        fprintf(o, "        s->pc = 0x%04X;\n", (uint16_t)(addr + 3));
+        fprintf(o, "        s->cyc += %d;\n", cyc_base(in));
+        fprintf(o, "        uint16_t ea = (uint16_t)(%s + (int8_t)sms_read8(0x%04X));\n",
+                idx, (uint16_t)(addr + 2));
+        emit_alu(o, alu, "sms_read8(ea)");
+        fprintf(o, "            return;\n        }\n");
+        return true;
+    }
+    return false;
+}
+
+static Z80EmitResult emit_transaction(FILE *output,FILE *scratch,
+ const Z80Insn *in,uint16_t address,int live) {
+ if(!output||!scratch||output==scratch||!in||in->length<1||in->length>4||
+    (unsigned)in->prefix>Z80_PFX_FDCB)return Z80_EMIT_INVALID;
+ if(!live&&in->illegal)return Z80_EMIT_UNSUPPORTED;
+ clearerr(scratch);
+ if(fseek(scratch,0,SEEK_SET))return Z80_EMIT_IO;
+ if(setjmp(emitter_escape))return Z80_EMIT_UNSUPPORTED;
+ if(live){if(!emit_flat_live_operands(scratch,in,address))return Z80_EMIT_UNSUPPORTED;}
+ else emit_flat_body(scratch,in,address);
+ if(ferror(scratch)||fflush(scratch))return Z80_EMIT_IO;
+ const long length=ftell(scratch);
+ if(length<0||fseek(scratch,0,SEEK_SET))return Z80_EMIT_IO;
+ char block[4096];size_t remaining=(size_t)length;
+ while(remaining){
+  const size_t wanted=remaining<sizeof block?remaining:sizeof block;
+  const size_t count=fread(block,1,wanted,scratch);
+  if(count!=wanted||fwrite(block,1,count,output)!=count)return Z80_EMIT_IO;
+  remaining-=count;
+ }
+ return Z80_EMIT_OK;
+}
+Z80EmitResult z80_emit_step_body_with_scratch(FILE *output,FILE *scratch,const Z80Insn *in,uint16_t address) {
+ return emit_transaction(output,scratch,in,address,0);
+}
+Z80EmitResult z80_emit_live_operand_case_with_scratch(FILE *output,FILE *scratch,const Z80Insn *in,uint16_t address) {
+ return emit_transaction(output,scratch,in,address,1);
+}
+Z80EmitResult z80_emit_step_body(FILE *output,const Z80Insn *in,uint16_t address) {
+ if(!output||!in||in->length<1||in->length>4||(unsigned)in->prefix>Z80_PFX_FDCB)return Z80_EMIT_INVALID;
+ if(in->illegal)return Z80_EMIT_UNSUPPORTED;
+ FILE *scratch=tmpfile();if(!scratch)return Z80_EMIT_IO;
+ Z80EmitResult result=z80_emit_step_body_with_scratch(output,scratch,in,address);
+ fclose(scratch);return result;
+}
+Z80EmitResult z80_emit_live_operand_case(FILE *output,const Z80Insn *in,uint16_t address) {
+ if(!output||!in||in->length<1||in->length>4||(unsigned)in->prefix>Z80_PFX_FDCB)return Z80_EMIT_INVALID;
+ FILE *scratch=tmpfile();if(!scratch)return Z80_EMIT_IO;
+ Z80EmitResult result=z80_emit_live_operand_case_with_scratch(output,scratch,in,address);
+ fclose(scratch);return result;
 }
