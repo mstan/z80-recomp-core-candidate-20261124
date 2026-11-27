@@ -1,5 +1,7 @@
 # z80-recomp-core
 
+Current licensing and the grant for existing owner contributions are documented in [LICENSE-SCOPE.md](LICENSE-SCOPE.md).
+
 Shared Zilog Z80 static-recompiler runtime contract and verified instruction
 semantics used to support:
 
